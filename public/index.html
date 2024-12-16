@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OrientDB Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: row;
+            margin: 0;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+
+        #buttonBar {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background-color: #f4f4f4;
+            border-bottom: 1px solid #ddd;
+        }
+
+        #buttonBar button {
+            margin-right: 10px;
+            padding: 8px 16px;
+            border: 1px solid #ccc;
+            background-color: #fff;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        #buttonBar button:hover {
+            background-color: #e6e6e6;
+        }
+
+        #sidebar {
+            display: flex;
+            flex-direction: column;
+            width: 20%;
+            background: #f5f5f5;
+            border-right: 1px solid #ccc;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        #classes,
+        #edges {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            padding: 5px;
+        }
+
+        #menu {
+            position: absolute;
+            display: none;
+            background: white;
+            border: 1px solid black;
+            z-index: 1000;
+        }
+
+        #menu button {
+            display: block;
+            padding: 8px;
+            width: 100%;
+            border: none;
+            background: white;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        #menu button:hover {
+            background: lightgray;
+        }
+
+        #graph {
+            flex: 3;
+            height: 100%;
+        }
+
+        .button-bar {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+            /* Ajusta el margen inferior según sea necesario */
+        }
+
+        .button-bar button {
+            /* Estilos para los botones */
+            background-color: #f44336;
+            /* Rojo */
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="sidebar">
+        <h3>Clases de Vértices</h3>
+        <ul id="classes"></ul>
+        <h3>Clases de Edges</h3>
+        <ul id="edges"></ul>
+    </div>
+    <div viewer>
+        <div class="button-bar">
+            <button id="physics">Physics</button>
+            <button id="hideNode">Hide</button>
+        </div>
+        <div id="graph"></div>
+    </div>
+    <!-- Menú contextual -->
+    <div id="menu">
+        <button id="hideNode">Ocultar Nodo</button>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", async () => {
+            const nodes = new vis.DataSet([]);
+            const edges = new vis.DataSet([]);
+            let network, allNodes, physicsEnabled = true;;
+
+            // Función para cargar clases desde el servidor
+            async function cargarClases() {
+                try {
+                    const response = await fetch("http://localhost:3000/classes");
+                    const data = await response.json();
+                    console.log("Datos recibidos del servidor:", data);
+
+                    // Agregar vértices como nodos en el grafo
+                    const vertexMap = {}; // Mapeo para identificar IDs únicos de nodos
+
+                    // Agregar vértices como nodos en el grafo
+                    data.vertices.forEach((vertex, index) => {
+                        vertexMap[vertex] = index;
+                        nodes.add({
+                            id: index,
+                            label: vertex,
+                            shape: "ellipse",
+                        });
+                        console.log(vertex);
+                        // Agregar a la lista de vértices
+                        const li = document.createElement("li");
+                        li.textContent = vertex;
+                        li.style.cursor = "pointer";
+                        li.onclick = () => highlightNode(index);
+                        document.getElementById("classes").appendChild(li);
+                    });
+
+                    // Agregar edges al grafo según las relaciones
+                    data.relationships.forEach((rel) => {
+                        const fromId = vertexMap[rel.from];
+                        const toId = vertexMap[rel.to];
+
+                        if (fromId !== undefined && toId !== undefined) {
+                            edges.add({
+                                from: fromId,
+                                to: toId,
+                                label: rel.edgeName,
+                                font: { align: "top" },
+                                arrows: "to",
+                            });
+
+                            console.log(`Edge agregado: ${rel.edgeName} de ${rel.from} a ${rel.to}`);
+                        }
+                    });
+
+                    // Agregar edges a la lista (no se mostrarán en el grafo directamente)
+                    data.edges.forEach((edge) => {
+                        const li = document.createElement("li");
+                        li.textContent = edge;
+                        document.getElementById("edges").appendChild(li);
+                    });
+
+                    allNodes = nodesDataset.get({ returnType: "Object" });
+                    console.log(allNodes);
+                } catch (error) {
+                    console.error("Error al cargar las clases:", error);
+                }
+            }
+
+            // Inicializar grafo con vis.js
+            function inicializarGrafo() {
+                const container = document.getElementById("graph");
+                const data = {
+                    nodes: nodes,
+                    edges: edges,
+                };
+
+                const options = {
+                    layout: {
+                        hierarchical: false,
+                    },
+                    physics: {
+                        enabled: true,
+                        barnesHut: {
+
+                            gravitationalConstant: -2000,
+                            centralGravity: 0.3,
+                            springLength: 495,
+                            springConstant: 0.04,
+                            damping: 0.09,
+                            avoidOverlap: 0
+                        },
+                        forceAtlas2Based: {
+
+                            gravitationalConstant: -50,
+                            centralGravity: 0.01,
+                            springConstant: 0.08,
+                            springLength: 100,
+                            damping: 0.4,
+                            avoidOverlap: 0
+                        },
+                        repulsion: {
+                            centralGravity: 0.2,
+                            springLength: 200,
+                            springConstant: 0.05,
+                            nodeDistance: 400,
+                            damping: 0.09
+                        },
+                        solver: 'forceAtlas2Based',
+                        stabilization: {
+                            enabled: true,
+                            iterations: 1000,
+                            updateInterval: 100,
+                            onlyDynamicEdges: false,
+                            fit: true
+                        },
+                        timestep: 0.5,
+                        adaptiveTimestep: true,
+
+                    },
+                };
+
+                network = new vis.Network(container, data, options);
+            }
+
+            // Resaltar un nodo en el grafo
+            function highlightNode(nodeId) {
+                network.selectNodes([nodeId]);
+                network.focus(nodeId, { scale: 1.5 });
+            }
+
+            // Cargar clases y mostrar grafo
+            await cargarClases();
+            inicializarGrafo();
+
+            // Botón para activar/desactivar física
+            const togglePhysicsButton = document.getElementById("physics");
+            togglePhysicsButton.addEventListener("click", () => {
+                physicsEnabled = !physicsEnabled;
+                network.setOptions({
+                    physics: {
+                        enabled: physicsEnabled
+                    }
+                });
+                togglePhysicsButton.textContent = physicsEnabled ? "Desactivar Física" : "Activar Física";
+            });
+
+            // Menú contextual para nodos
+            const menu = document.getElementById("menu");
+            let selectedNodeId = null;
+
+            // Mostrar menú contextual al hacer clic derecho en un nodo
+            network.on("oncontext", function (params) {
+                params.event.preventDefault();
+                const nodeId = network.getNodeAt(params.pointer.DOM);
+                if (nodeId) {
+                    selectedNodeId = nodeId;
+                    menu.style.display = "block";
+                    menu.style.left = `${params.event.clientX}px`;
+                    menu.style.top = `${params.event.clientY}px`;
+                } else {
+                    menu.style.display = "none";
+                }
+            });
+
+            // Ocultar menú contextual al hacer clic fuera
+            window.addEventListener("click", () => {
+                menu.style.display = "none";
+            });
+
+            // Funcionalidad del menú: ocultar nodo
+            const hideNodeButton = document.getElementById("hideNode");
+            hideNodeButton.addEventListener("click", () => {
+                if (selectedNodeId) {
+                    nodes.remove(selectedNodeId);
+                    selectedNodeId = null;
+                    menu.style.display = "none";
+                }
+            });
+
+            // resaltar los nodos conectados cuando se hace click sobre un nodo
+                
+                
+            network.on("click", function (params) {
+                // if something is selected:
+                if (params.nodes.length > 0) {
+                    highlightActive = true;
+                    var i, j;
+                    var selectedNode = params.nodes[0];
+                    var degrees = 2;
+                    console.log("selectedNode: ",selectedNode);
+                    
+                    // mark all nodes as hard to read.
+                    for (var nodeId in nodes) {
+                        nodes[nodeId].color = "rgba(200,200,200,0.5)";
+                        if (nodes[nodeId].hiddenLabel === undefined) {
+                            nodes[nodeId].hiddenLabel = nodes[nodeId].label;
+                            nodes[nodeId].label = undefined;
+                        }
+                    }
+                    var connectedNodes = network.getConnectedNodes(selectedNode);
+                    console.log("connectedNodes: ",connectedNodes);
+                    var allConnectedNodes = [];
+                    
+                    // get the second degree nodes
+                    for (i = 1; i < degrees; i++) {
+                        for (j = 0; j < connectedNodes.length; j++) {
+                            allConnectedNodes = allConnectedNodes.concat(
+                                network.getConnectedNodes(connectedNodes[j])
+                            );
+                        }
+                    }
+                    console.log("allConnectedNodes:",allConnectedNodes); 
+
+                    // all second degree nodes get a different color and their label back
+                    for (i = 0; i < allConnectedNodes.length; i++) {
+                        console.log("i: ",i,allConnectedNodes[i],network.getNodeAt([allConnectedNodes[i]]));
+                        nodes[allConnectedNodes[i]].color = "rgba(150,150,150,0.75)";
+                        if (nodes[allConnectedNodes[i]].hiddenLabel !== undefined) {
+                            nodes[allConnectedNodes[i]].label =
+                                nodes[allConnectedNodes[i]].hiddenLabel;
+                            nodes[allConnectedNodes[i]].hiddenLabel = undefined;
+                        }
+                    }
+
+                    // all first degree nodes get their own color and their label back
+                    for (i = 0; i < connectedNodes.length; i++) {
+                        nodes[connectedNodes[i]].color = undefined;
+                        if (nodes[connectedNodes[i]].hiddenLabel !== undefined) {
+                            nodes[connectedNodes[i]].label =
+                                nodes[connectedNodes[i]].hiddenLabel;
+                            nodes[connectedNodes[i]].hiddenLabel = undefined;
+                        }
+                    }
+
+                    // the main node gets its own color and its label back.
+                    nodes[selectedNode].color = undefined;
+                    if (nodes[selectedNode].hiddenLabel !== undefined) {
+                        nodes[selectedNode].label = nodes[selectedNode].hiddenLabel;
+                        nodes[selectedNode].hiddenLabel = undefined;
+                    }
+                } else if (highlightActive === true) {
+                    // reset all nodes
+                    for (var nodeId in nodes) {
+                        nodes[nodeId].color = undefined;
+                        if (nodes[nodeId].hiddenLabel !== undefined) {
+                            nodes[nodeId].label = nodes[nodeId].hiddenLabel;
+                            nodes[nodeId].hiddenLabel = undefined;
+                        }
+                    }
+                    highlightActive = false;
+                }
+
+                // transform the object into an array
+                var updateArray = [];
+                for (nodeId in nodes) {
+                    if (nodes.hasOwnProperty(nodeId)) {
+                        updateArray.push(nodes[nodeId]);
+                    }
+                }
+                nodesDataset.update(updateArray);
+            });
+
+        });
+    </script>
+</body>
+
+</html>

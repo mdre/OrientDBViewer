@@ -1,0 +1,7 @@
+{
+    "host":"dummy2.intranet",
+    "port":2424,
+    "database":"targetdatabase",
+    "user":"usuario",
+    "password": "password"
+}

@@ -129,12 +129,12 @@
         document.addEventListener("DOMContentLoaded", async () => {
             const nodes = new vis.DataSet([]);
             const edges = new vis.DataSet([]);
-            let network, allNodes, physicsEnabled = true;;
+            let network, allNodes, highlightActive = false, physicsEnabled = true;;
 
             // Función para cargar clases desde el servidor
             async function cargarClases() {
                 try {
-                    const response = await fetch("http://localhost:3000/classes");
+                    const response = await fetch("/classes");
                     const data = await response.json();
                     console.log("Datos recibidos del servidor:", data);
 
@@ -143,16 +143,16 @@
 
                     // Agregar vértices como nodos en el grafo
                     data.vertices.forEach((vertex, index) => {
-                        vertexMap[vertex] = index;
+                        vertexMap[vertex.className] = index;
                         nodes.add({
                             id: index,
-                            label: vertex,
+                            label: vertex.className,
                             shape: "ellipse",
                         });
-                        console.log(vertex);
+                        console.log(vertex.className);
                         // Agregar a la lista de vértices
                         const li = document.createElement("li");
-                        li.textContent = vertex;
+                        li.textContent = vertex.className;
                         li.style.cursor = "pointer";
                         li.onclick = () => highlightNode(index);
                         document.getElementById("classes").appendChild(li);
@@ -170,21 +170,24 @@
                                 label: rel.edgeName,
                                 font: { align: "top" },
                                 arrows: "to",
+                                color: rel.color,
                             });
 
-                            console.log(`Edge agregado: ${rel.edgeName} de ${rel.from} a ${rel.to}`);
+                            console.log(`Edge agregado: ${rel.edgeName} de ${rel.from} a ${rel.to} :: color: ${rel.color})`);
                         }
                     });
 
                     // Agregar edges a la lista (no se mostrarán en el grafo directamente)
-                    data.edges.forEach((edge) => {
-                        const li = document.createElement("li");
-                        li.textContent = edge;
-                        document.getElementById("edges").appendChild(li);
+                    data.relationships.forEach((edge) => {
+                        if (edge.edgeName !== "Inheritance") {
+                            const li = document.createElement("li");
+                            li.textContent = edge.edgeName + "( " + edge.from + " -> " + edge.to + ")";
+                            document.getElementById("edges").appendChild(li);
+                        }
                     });
 
-                    allNodes = nodesDataset.get({ returnType: "Object" });
-                    console.log(allNodes);
+                    //allNodes = nodesDataset.get({ returnType: "Object" });
+                    //console.log(allNodes);
                 } catch (error) {
                     console.error("Error al cargar las clases:", error);
                 }
@@ -199,6 +202,9 @@
                 };
 
                 const options = {
+                    interaction: {
+                        hover: true, // Habilitar hover
+                    },
                     layout: {
                         hierarchical: false,
                     },
@@ -240,6 +246,10 @@
                         timestep: 0.5,
                         adaptiveTimestep: true,
 
+                    },
+                    edges: {
+                        hoverWidth: 1.5,
+                        labelHighlightBold: true,
                     },
                 };
 
@@ -302,8 +312,8 @@
             });
 
             // resaltar los nodos conectados cuando se hace click sobre un nodo
-                
-                
+
+
             network.on("click", function (params) {
                 // if something is selected:
                 if (params.nodes.length > 0) {
@@ -311,8 +321,8 @@
                     var i, j;
                     var selectedNode = params.nodes[0];
                     var degrees = 2;
-                    console.log("selectedNode: ",selectedNode);
-                    
+                    console.log("selectedNode: ", selectedNode);
+
                     // mark all nodes as hard to read.
                     for (var nodeId in nodes) {
                         nodes[nodeId].color = "rgba(200,200,200,0.5)";
@@ -322,9 +332,9 @@
                         }
                     }
                     var connectedNodes = network.getConnectedNodes(selectedNode);
-                    console.log("connectedNodes: ",connectedNodes);
+                    console.log("connectedNodes: ", connectedNodes);
                     var allConnectedNodes = [];
-                    
+
                     // get the second degree nodes
                     for (i = 1; i < degrees; i++) {
                         for (j = 0; j < connectedNodes.length; j++) {
@@ -333,11 +343,11 @@
                             );
                         }
                     }
-                    console.log("allConnectedNodes:",allConnectedNodes); 
+                    console.log("allConnectedNodes:", allConnectedNodes);
 
                     // all second degree nodes get a different color and their label back
                     for (i = 0; i < allConnectedNodes.length; i++) {
-                        console.log("i: ",i,allConnectedNodes[i],network.getNodeAt([allConnectedNodes[i]]));
+                        console.log("i: ", i, allConnectedNodes[i], network.getNodeAt([allConnectedNodes[i]]));
                         nodes[allConnectedNodes[i]].color = "rgba(150,150,150,0.75)";
                         if (nodes[allConnectedNodes[i]].hiddenLabel !== undefined) {
                             nodes[allConnectedNodes[i]].label =
@@ -381,7 +391,7 @@
                         updateArray.push(nodes[nodeId]);
                     }
                 }
-                nodesDataset.update(updateArray);
+                // nodesDataset.update(updateArray);
             });
 
         });

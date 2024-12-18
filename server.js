@@ -17,124 +17,154 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 // Conexión con OrientDB
-let orientdb;
-let vertices;
-let edges;
+let vertices = [];
+let edges = [];
 let relationships = [];
 let dbConfig;
+// utilizado para determinar que relaciones ya se agregaron 
+let duplicatedRelationshipsTest = new Set();
 
 // Función para cargar configuración de la base de datos
 const loadDBConfig = () => {
     try {
-      if (fs.existsSync(DB_CONFIG_FILE)) {
-        dbConfig = JSON.parse(fs.readFileSync(DB_CONFIG_FILE, "utf-8"));
-        console.log("Configuración de la base de datos cargada desde db.json");
-      } else {
-        throw new Error(`Archivo de configuración ${DB_CONFIG_FILE} no encontrado.`);
-      }
+        if (fs.existsSync(DB_CONFIG_FILE)) {
+            dbConfig = JSON.parse(fs.readFileSync(DB_CONFIG_FILE, "utf-8"));
+            console.log("Configuración de la base de datos cargada desde db.json");
+        } else {
+            throw new Error(`Archivo de configuración ${DB_CONFIG_FILE} no encontrado.`);
+        }
     } catch (error) {
-      console.error("Error al cargar la configuración de la base de datos:", error);
-      process.exit(1); // Terminar el proceso si no se puede cargar la configuración
+        console.error("Error al cargar la configuración de la base de datos:", error);
+        process.exit(1); // Terminar el proceso si no se puede cargar la configuración
     }
 };
-  
 
-
+// Función para actualizar el esquema desde OrientDB
 const updateScheme = async () => {
     loadDBConfig();
-    OrientDBClient.connect({
-        host: dbConfig.host,
-        port: deConfig.port
-    }).then((client) => {
-        orientdb = client.session({
+    try {
+        const client = await OrientDBClient.connect({
+            host: dbConfig.host,
+            port: dbConfig.port,
+        });
+
+        const session = await client.session({
             name: dbConfig.database,
             username: dbConfig.user,
             password: dbConfig.password,
-        }).then(session => {
-            console.log("Conectado a OrientDB");
-            console.log(orientdb);
-            session.query("SELECT FROM (SELECT expand(classes) FROM metadata:schema) order by name")
-                .all()
-                .then((result) => {
-                    // console.log(result);
-                    allClasses = result;
-
-                    // Función recursiva para encontrar las clases que heredan de una superclase
-                    const findSubclasses = (superclassName) => {
-                        return allClasses
-                            .filter((cls) => cls.superClass === superclassName)
-                            .map((cls) => cls.name)
-                            .concat(
-                                allClasses
-                                    .filter((cls) => cls.superClass === superclassName)
-                                    .flatMap((cls) => findSubclasses(cls.name))
-                            );
-                    };
-
-                    // vertices = clases.filter((cls) => cls.superClass === "V").map((cls) => cls.name);
-                    vertices = findSubclasses("V");
-
-                    // Crear edges entre clases y sus superclases
-                    allClasses.forEach((cls) => {
-                        const superClass = cls.superClass;
-                        if (superClass && superClass !== "V" && superClass !== "E") {
-                            relationships.push({
-                                edgeName: "Inheritance",
-                                from: superClass,
-                                to: cls.name,
-                                color: {
-                                    color: '##55aaff',
-                                    highlight: '##0055ff',
-                                    hover: '##0055ff',
-                                    inherit: 'from',
-                                    opacity: 1.0
-                                }
-                            });
-                        }
-                    });
-
-                    // edges = clases.filter((cls) => cls.superClass === "E").map((cls) => cls.name);
-                    edges = findSubclasses("E");
-                    console.log("allClasses: " + allClasses.length + " vertices: " + vertices.length + " edges: " + edges.length);
-                    // Determinar las relaciones entre vértices y edges
-
-                    for (const edge of edges) {
-                        session.query(`SELECT distinct out.@class as fromClass, in.@class as toClass FROM ${edge}`)
-                            .all()
-                            .then((edgeDefinition) => {
-                                if (edgeDefinition.length > 0) {
-                                    edgeDefinition.forEach((e) => {
-                                        relationships.push({
-                                            edgeName: edge,
-                                            from: e.fromClass || "Desconocido",
-                                            to: e.toClass || "Desconocido",
-                                            color: {
-                                                color: '#848484',
-                                                highlight: '##00aaff',
-                                                hover: '##00aaff',
-                                                inherit: 'from',
-                                                opacity: 1.0
-                                            }
-                                        });
-                                        console.log(edge, e);
-                                    });
-                                    
-                                } else {
-                                    console.log(edge, "<<<<<<------ NO RELATION FOUND");
-                                }
-                            });
-                    }
-
-                    // Guardar los datos en scheme.json
-                    const schemeData = { vertices, relationships };
-                    fs.writeFileSync(SCHEME_FILE, JSON.stringify(schemeData, null, 2));
-                    console.log(`Esquema guardado en ${SCHEME_FILE}`);
-
-                });
         });
 
-    });
-}
+        console.log("Conectado a OrientDB");
+
+        // Recuperar todas las clases del esquema
+        const allClasses = await session.query("SELECT expand(classes) FROM metadata:schema ORDER BY name").all();
+
+        // Función recursiva para encontrar las clases que heredan de una superclase
+        const findSubclasses = (superclassName) => {
+            return allClasses
+                .filter((cls) => cls.superClass === superclassName)
+                .map((cls) => ({
+                    className: cls.name,
+                    superClass: cls.superClass || null,
+                }))
+                .concat(
+                    allClasses
+                        .filter((cls) => cls.superClass === superclassName)
+                        .flatMap((cls) => findSubclasses(cls.name))
+                );
+        };
+
+        // Identificar vértices y edges
+        vertices = findSubclasses("V");
+        edges = findSubclasses("E");
+
+        console.log("Vértices detectados:", vertices);
+        console.log("Edges detectados:", edges);
+
+        // Crear edges entre clases y sus superclases
+        allClasses.forEach((cls) => {
+            const superClass = cls.superClass;
+            if (superClass && superClass !== "V" && superClass !== "E") {
+                relationships.push({
+                    edgeName: "Inheritance",
+                    from: superClass,
+                    to: cls.name,
+                    color: {
+                        color: "#55aaff",
+                        highlight: "#0055ff",
+                        hover: "#0055ff",
+                        inherit: "from",
+                        opacity: 1.0,
+                    },
+                });
+            }
+        });
+
+        // Procesar relaciones entre edges y nodos
+        const relationshipPromises = edges.map((edge) => 
+            session
+                .query(`select $fromSuperClass[0].superClass as fromSC, 
+                               fromClass, 
+                               toClass, 
+                               $toSuperClass[0].superClass as toSC 
+                            from (SELECT distinct 
+                                            out.@class as fromClass, 
+                                            in.@class as toClass 
+                                    FROM ${edge.className} 
+                                ) 
+                            LET $fromSuperClass = (SELECT superClass 
+                                                        FROM 
+                                                            (SELECT expand(classes) FROM metadata:schema) 
+                                                        WHERE name = $parent.$current.fromClass), 
+                                $toSuperClass = (SELECT superClass 
+                                                        FROM 
+                                                            (SELECT expand(classes) FROM metadata:schema) 
+                                                        WHERE name = $parent.$current.toClass)`)
+                .all()
+                .then((edgeDefinition) => {
+                    edgeDefinition.forEach((e) => {
+                        // Verificar si la relación ya existe
+                        fc = e.fromSC && e.fromSC !== "V" ? e.fromSC : e.fromClass;
+                        tc = e.toSC && e.toSC !== "V" ? e.toSC : e.toClass;
+                        
+                        const edgeTest = ""+edge+">"+fc+">"+tc;
+
+                        if (!duplicatedRelationshipsTest.has(edgeTest)) {
+                            duplicatedRelationshipsTest.add(edgeTest);
+                            relationships.push({
+                                edgeName: edge,
+                                from: fc,
+                                to: tc,
+                                color: {
+                                    color: "#848484",
+                                    highlight: "#00aaff",
+                                    hover: "#00aaff",
+                                    inherit: "from",
+                                    opacity: 1.0,
+                                },
+                            });
+                            console.log(edge, e);
+                        }
+                    });
+                })
+                .catch((err) => console.error("Error: ",edge))
+            
+        );
+
+        // Esperar a que se completen todas las relaciones
+        await Promise.all(relationshipPromises);
+
+        // Guardar los datos en scheme.json
+        const schemeData = { vertices, relationships };
+        fs.writeFileSync(SCHEME_FILE, JSON.stringify(schemeData, null, 2));
+        console.log(`Esquema guardado en ${SCHEME_FILE}`);
+
+        await session.close();
+        await client.close();
+    } catch (error) {
+        console.error("Error al actualizar el esquema:", error);
+    }
+};
 
 // Función para cargar el esquema desde scheme.json
 const loadScheme = () => {
@@ -153,28 +183,10 @@ const loadScheme = () => {
     }
 };
 
-
 // Ruta para obtener clases de vértices y edges
 app.get("/classes", async (req, res) => {
-    console.log(orientdb);
     try {
-        //const result = await orientdb.query("SELECT FROM (SELECT expand(classes) FROM metadata:schema)");
-        // const vertices = clases.filter((cls) => cls.superClass === "V").map((cls) => cls.name);
-        // const edges = clases.filter((cls) => cls.superClass === "E").map((cls) => cls.name);
-
-        // Determinar las relaciones entre vértices y edges
-        // const relationships = [];
-        // for (const edge of edges) {
-        //     const edgeDefinition = await orientdb.query(`SELECT out, in FROM ${edge} LIMIT 1`);
-        //     if (edgeDefinition.length > 0) {
-        //         relationships.push({
-        //             edgeName: edge,
-        //             from: edgeDefinition[0].out || "Desconocido",
-        //             to: edgeDefinition[0].in || "Desconocido",
-        //         });
-        //     }
-        // }
-        res.json({ vertices, edges, relationships });
+        res.json({ vertices, relationships });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Error al recuperar clases de OrientDB" });

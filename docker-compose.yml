@@ -1,0 +1,11 @@
+services:
+    orientdbviewer:
+        image: node:latest
+        hostname: orientdbviewer
+        ports:
+            - "3000:3000"
+        volumes:
+            - ./:/orientdbviewer
+        restart: unless-stopped
+        working_dir: /orientdbviewer
+        command: ["bash", "run.sh"]
